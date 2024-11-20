@@ -674,6 +674,98 @@ async def recall(interaction: Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(
+    name="rules",
+    description="Show the rules and how to play Word Imposter"
+)
+@commands.cooldown(1, 5, commands.BucketType.channel)
+async def rules(interaction: Interaction):
+    if not interaction.guild:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+        
+    settings = server_config.get_settings(str(interaction.guild.id))
+    
+    embed = discord.Embed(
+        title="📖 How to Play Word Imposter",
+        color=Color.blue(),
+        description="Word Imposter is a social deduction game where players try to identify who doesn't know the secret word!"
+    )
+    
+    # Game Setup
+    embed.add_field(
+        name="🎮 Game Setup",
+        value=(
+            f"• {settings.min_players}-{settings.max_players} players can join\n"
+            f"• {'One imposter' if not settings.multiple_imposters else 'Multiple imposters'} will be chosen\n"
+            f"• Everyone except the imposter(s) gets to see the secret word\n"
+            f"• The game lasts {settings.rounds} rounds"
+        ),
+        inline=False
+    )
+    
+    # How to Play
+    embed.add_field(
+        name="🎯 How to Play",
+        value=(
+            "1. Join the game with the button when someone uses `/play`\n"
+            "2. Once enough players join, anyone can start with `/start`\n"
+            "3. Check your DMs to see if you're an imposter!\n"
+            "4. Use `/describe` to begin the description phase"
+        ),
+        inline=False
+    )
+    
+    # Description Phase
+    embed.add_field(
+        name="📝 Description Phase",
+        value=(
+            f"• Each player has {settings.description_timeout} seconds to describe the word\n"
+            "• If you're not the imposter, describe the word without saying it\n"
+            "• If you are the imposter, try to blend in!\n"
+            f"• Missing {settings.max_missed_rounds} rounds will remove you from the game\n"
+            "• Use `/recall` to see all descriptions"
+        ),
+        inline=False
+    )
+    
+    # Voting Phase
+    embed.add_field(
+        name="🗳️ Voting Phase",
+        value=(
+            "• After descriptions, use `/vote` to start voting\n"
+            f"• Players have {settings.vote_timeout} seconds to vote via DM\n"
+            "• Vote for who you think is the imposter\n"
+            "• Use `/tally` to see results early if everyone voted"
+        ),
+        inline=False
+    )
+    
+    # Winning
+    embed.add_field(
+        name="🏆 Winning",
+        value=(
+            "**Regular Players Win If:**\n"
+
+            "**Imposter Wins If:**\n"
+            "• They avoid being caught\n"
+            "• Players vote out a regular player"
+        ),
+        inline=False
+    )
+    
+    # Additional Commands
+    embed.add_field(
+        name="⚡ Helpful Commands",
+        value=(
+            "`/status` - Check game progress\n"
+            "`/votekick` - Start a vote to remove inactive players\n"
+            "`/request` - Suggest new words for the game"
+        ),
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="status", description="Show current game status")
 @commands.cooldown(1, 5, commands.BucketType.channel)
