@@ -21,6 +21,7 @@ intents.members = True
 # Bot initialization
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+
 class ErrorHandler:
     @staticmethod
     async def handle_command_error(interaction: Interaction, error: Exception):
@@ -28,15 +29,18 @@ class ErrorHandler:
         if isinstance(error, commands.MissingPermissions):
             error_message = "You don't have permission to use this command!"
         elif isinstance(error, commands.CommandOnCooldown):
-            error_message = f"Please wait {error.retry_after:.1f}s before using this command again."
-        
+            error_message = (
+                f"Please wait {error.retry_after:.1f}s before using this command again."
+            )
+
         try:
             await interaction.response.send_message(error_message, ephemeral=True)
         except discord.InteractionResponded:
             await interaction.followup.send(error_message, ephemeral=True)
-        
+
         print(f"Error in {interaction.command.name}: {str(error)}")
         traceback.print_exception(type(error), error, error.__traceback__)
+
 
 @dataclass
 class ServerSettings:
@@ -48,6 +52,7 @@ class ServerSettings:
     max_missed_rounds: int = 2
     multiple_imposters: bool = False
     imposter_ratio: float = 0.25  # 25% of players will be imposters in larger games
+
 
 class GameState:
     def __init__(self):
@@ -72,15 +77,16 @@ class GameState:
             self.vote_task.cancel()
         self.__init__()
 
+
 class ServerConfig:
-    def __init__(self, config_file: str = 'server_config.json'):
+    def __init__(self, config_file: str = "server_config.json"):
         self.config_file = config_file
         self.settings: Dict[str, ServerSettings] = {}
         self.load_config()
 
     def load_config(self):
         if os.path.exists(self.config_file):
-            with open(self.config_file, 'r') as f:
+            with open(self.config_file, "r") as f:
                 data = json.load(f)
                 for server_id, settings in data.items():
                     self.settings[server_id] = ServerSettings(**settings)
@@ -88,18 +94,18 @@ class ServerConfig:
     def save_config(self):
         data = {
             server_id: {
-                'min_players': settings.min_players,
-                'max_players': settings.max_players,
-                'rounds': settings.rounds,
-                'description_timeout': settings.description_timeout,
-                'vote_timeout': settings.vote_timeout,
-                'max_missed_rounds': settings.max_missed_rounds,
-                'multiple_imposters': settings.multiple_imposters,
-                'imposter_ratio': settings.imposter_ratio
+                "min_players": settings.min_players,
+                "max_players": settings.max_players,
+                "rounds": settings.rounds,
+                "description_timeout": settings.description_timeout,
+                "vote_timeout": settings.vote_timeout,
+                "max_missed_rounds": settings.max_missed_rounds,
+                "multiple_imposters": settings.multiple_imposters,
+                "imposter_ratio": settings.imposter_ratio,
             }
             for server_id, settings in self.settings.items()
         }
-        with open(self.config_file, 'w') as f:
+        with open(self.config_file, "w") as f:
             json.dump(data, f, indent=4)
 
     def get_settings(self, server_id: str) -> ServerSettings:
@@ -107,8 +113,11 @@ class ServerConfig:
             self.settings[server_id] = ServerSettings()
         return self.settings[server_id]
 
+
 class WordManager:
-    def __init__(self, words_file: str = 'nouns.txt', used_words_file: str = 'used_words.txt'):
+    def __init__(
+        self, words_file: str = "nouns.txt", used_words_file: str = "used_words.txt"
+    ):
         self.words_file = words_file
         self.used_words_file = used_words_file
         self.request_cooldowns: Dict[int, datetime] = {}
@@ -118,37 +127,37 @@ class WordManager:
     def _ensure_files_exist(self):
         for file in [self.words_file, self.used_words_file]:
             if not os.path.exists(file):
-                with open(file, 'w') as f:
-                    f.write('')
+                with open(file, "w") as f:
+                    f.write("")
 
     def get_random_word(self) -> str:
-        with open(self.words_file, 'r') as f:
+        with open(self.words_file, "r") as f:
             words = set(f.read().splitlines())
-        
-        with open(self.used_words_file, 'r') as f:
+
+        with open(self.used_words_file, "r") as f:
             used_words = set(f.read().splitlines())
-        
+
         available_words = words - used_words
         if not available_words:
             available_words = words
-            with open(self.used_words_file, 'w') as f:
-                f.write('')
-        
+            with open(self.used_words_file, "w") as f:
+                f.write("")
+
         word = random.choice(list(available_words))
-        with open(self.used_words_file, 'a') as f:
-            f.write(f'{word}\n')
-        
+        with open(self.used_words_file, "a") as f:
+            f.write(f"{word}\n")
+
         return word
 
     def is_appropriate_word(self, word: str) -> bool:
         # Check for profanity
         if profanity.contains_profanity(word):
             return False
-        
+
         # Check for valid word format (letters only, no numbers or special characters)
-        if not re.match(r'^[a-zA-Z]+$', word):
+        if not re.match(r"^[a-zA-Z]+$", word):
             return False
-        
+
         return True
 
     def check_cooldown(self, user_id: int) -> bool:
@@ -163,21 +172,22 @@ class WordManager:
             return False, "Please wait 5 minutes between word requests."
 
         word = word.strip().lower()
-        
+
         if not self.is_appropriate_word(word):
             return False, "This word is not appropriate or contains invalid characters."
 
-        with open(self.words_file, 'r') as f:
+        with open(self.words_file, "r") as f:
             existing_words = set(f.read().splitlines())
-        
+
         if word in existing_words:
             return False, "This word already exists in the word list."
-        
-        with open(self.words_file, 'a') as f:
-            f.write(f'{word}\n')
-        
+
+        with open(self.words_file, "a") as f:
+            f.write(f"{word}\n")
+
         self.request_cooldowns[user_id] = datetime.now()
         return True, f"Successfully added '{word}' to the word list!"
+
 
 class PlayAgainView(discord.ui.View):
     def __init__(self, game_manager, channel_id):
@@ -190,6 +200,7 @@ class PlayAgainView(discord.ui.View):
         # Create a new game
         await play(interaction)
 
+
 class VoteKickView(discord.ui.View):
     def __init__(self, game: GameState, target_id: int):
         super().__init__()
@@ -201,25 +212,32 @@ class VoteKickView(discord.ui.View):
     @discord.ui.button(label="Vote to Kick", style=ButtonStyle.red)
     async def vote_kick(self, interaction: Interaction, button: discord.ui.Button):
         if interaction.user.id not in self.game.joined_users:
-            await interaction.response.send_message("You're not in the game!", ephemeral=True)
+            await interaction.response.send_message(
+                "You're not in the game!", ephemeral=True
+            )
             return
 
         if interaction.user.id in self.votes:
-            await interaction.response.send_message("You've already voted!", ephemeral=True)
+            await interaction.response.send_message(
+                "You've already voted!", ephemeral=True
+            )
             return
 
         self.votes.add(interaction.user.id)
         remaining_votes = self.required_votes - len(self.votes)
-        
+
         if remaining_votes <= 0:
             self.game.joined_users.remove(self.target_id)
-            await interaction.response.send_message(f"<@{self.target_id}> has been kicked from the game.")
+            await interaction.response.send_message(
+                f"<@{self.target_id}> has been kicked from the game."
+            )
             self.stop()
         else:
             await interaction.response.send_message(
                 f"Vote recorded. {remaining_votes} more votes needed to kick.",
-                ephemeral=True
+                ephemeral=True,
             )
+
 
 class VotingDropdown(discord.ui.Select):
     def __init__(self, game: GameState, options: List[SelectOption]):
@@ -227,29 +245,36 @@ class VotingDropdown(discord.ui.Select):
             placeholder="Vote for the Imposter",
             options=options,
             min_values=1,
-            max_values=1
+            max_values=1,
         )
         self.game = game
 
     async def callback(self, interaction: Interaction):
         if interaction.user.id not in self.game.joined_users:
-            await interaction.response.send_message("You're not part of this game!", ephemeral=True)
+            await interaction.response.send_message(
+                "You're not part of this game!", ephemeral=True
+            )
             return
 
         if interaction.user.id in self.game.votes:
-            await interaction.response.send_message("You've already voted!", ephemeral=True)
+            await interaction.response.send_message(
+                "You've already voted!", ephemeral=True
+            )
             return
 
         voted_user_id = int(self.values[0])
         self.game.votes[interaction.user.id] = voted_user_id
         self.game.voted_users.add(interaction.user.id)
         user = await interaction.client.fetch_user(voted_user_id)
-        await interaction.response.send_message(f"You voted for {user.name}.", ephemeral=True)
+        await interaction.response.send_message(
+            f"You voted for {user.name}.", ephemeral=True
+        )
 
         # Check if everyone has voted
         if len(self.game.votes) == len(self.game.joined_users):
             channel = interaction.channel
             await channel.send("Everyone has voted! Use /tally to see the results.")
+
 
 class GameView(discord.ui.View):
     def __init__(self, game: GameState):
@@ -259,23 +284,30 @@ class GameView(discord.ui.View):
     @discord.ui.button(label="Join Game", style=ButtonStyle.green)
     async def join_button(self, interaction: Interaction, button: discord.ui.Button):
         settings = server_config.get_settings(str(interaction.guild_id))
-        
+
         if len(self.game.joined_users) >= settings.max_players:
             await interaction.response.send_message(
                 f"Game is full! Maximum {settings.max_players} players allowed.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
         if interaction.user.id in self.game.joined_users:
-            await interaction.response.send_message("You've already joined!", ephemeral=True)
+            await interaction.response.send_message(
+                "You've already joined!", ephemeral=True
+            )
             return
 
         self.game.joined_users.append(interaction.user.id)
         embed = interaction.message.embeds[0]
-        embed.description = f"Players joined: {len(self.game.joined_users)}/{settings.max_players}"
+        embed.description = (
+            f"Players joined: {len(self.game.joined_users)}/{settings.max_players}"
+        )
         await interaction.message.edit(embed=embed)
-        await interaction.response.send_message("You've joined the game!", ephemeral=True)
+        await interaction.response.send_message(
+            "You've joined the game!", ephemeral=True
+        )
+
 
 class GameManager:
     def __init__(self):
@@ -301,8 +333,10 @@ class GameManager:
     def can_create_game(self, channel_id: int) -> bool:
         return channel_id not in self.used_channels
 
+
 game_manager = GameManager()
 server_config = ServerConfig()
+
 
 @bot.event
 async def on_ready():
@@ -313,13 +347,17 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
+
 async def auto_tally_votes(game: GameState, channel):
     try:
-        await asyncio.sleep(server_config.get_settings(str(channel.guild.id)).vote_timeout)
+        await asyncio.sleep(
+            server_config.get_settings(str(channel.guild.id)).vote_timeout
+        )
         if game.game_started and len(game.votes) > 0:
             await tally_votes(channel, game)
     except asyncio.CancelledError:
         pass
+
 
 async def tally_votes(channel, game: GameState):
     if len(game.votes) == 0:
@@ -338,9 +376,7 @@ async def tally_votes(channel, game: GameState):
 
     # Create results embed
     embed = discord.Embed(
-        title="📊 Voting Results",
-        color=Color.blue(),
-        timestamp=datetime.now()
+        title="📊 Voting Results", color=Color.blue(), timestamp=datetime.now()
     )
 
     # Add voting breakdown
@@ -350,105 +386,96 @@ async def tally_votes(channel, game: GameState):
         voting_breakdown.append(f"{user.name}: {votes} votes")
     embed.add_field(
         name="Votes Received",
-        value='\n'.join(voting_breakdown) or "No votes",
-        inline=False
+        value="\n".join(voting_breakdown) or "No votes",
+        inline=False,
     )
 
     # Game outcome
     if len(voted_players) == 1 and voted_players[0] in game.imposters:
         embed.add_field(
-            name="🎉 Players Win!",
-            value="They caught the imposter!",
-            inline=False
+            name="🎉 Players Win!", value="They caught the imposter!", inline=False
         )
     else:
         embed.add_field(
-            name="👻 Imposters Win!",
-            value="They weren't caught!",
-            inline=False
+            name="👻 Imposters Win!", value="They weren't caught!", inline=False
         )
         imposters = [await bot.fetch_user(imp_id) for imp_id in game.imposters]
         embed.add_field(
             name="The Imposters Were",
-            value=', '.join(imp.name for imp in imposters),
-            inline=False
+            value=", ".join(imp.name for imp in imposters),
+            inline=False,
         )
-        embed.add_field(
-            name="The Word Was",
-            value=game.current_word,
-            inline=False
-        )
+        embed.add_field(name="The Word Was", value=game.current_word, inline=False)
 
     # Game statistics
     game_duration = datetime.now() - game.start_time
     stats = [
         f"Duration: {game_duration.seconds // 60} minutes",
         f"Players: {len(game.joined_users)}",
-        f"Descriptions: {sum(len(desc) for desc in game.user_descriptions.values())}"
+        f"Descriptions: {sum(len(desc) for desc in game.user_descriptions.values())}",
     ]
-    embed.add_field(
-        name="📈 Game Statistics",
-        value='\n'.join(stats),
-        inline=False
-    )
+    embed.add_field(name="📈 Game Statistics", value="\n".join(stats), inline=False)
 
     # Send results and prompt for new game
     await channel.send(embed=embed, view=PlayAgainView(game_manager, channel.id))
     game_manager.end_game(channel.id)
 
-@bot.tree.command(
-    name="play",
-    description="Start a new game of Word Imposter"
-)
+
+@bot.tree.command(name="play", description="Start a new game of Word Imposter")
 @commands.cooldown(1, 30, commands.BucketType.channel)
 async def play(interaction: Interaction):
     if not interaction.guild or not interaction.channel:
-        await interaction.response.send_message("This command can only be used in a server channel.", ephemeral=True)
+        await interaction.response.send_message(
+            "This command can only be used in a server channel.", ephemeral=True
+        )
         return
 
     if not game_manager.can_create_game(interaction.channel.id):
-        await interaction.response.send_message("A game has already been started in this channel!", ephemeral=True)
+        await interaction.response.send_message(
+            "A game has already been started in this channel!", ephemeral=True
+        )
         return
 
     game = game_manager.create_game(interaction.channel.id)
     settings = server_config.get_settings(str(interaction.guild_id))
-    
+
     embed = discord.Embed(
         title="Word Imposter",
         description=f"Players joined: 0/{settings.max_players}",
-        color=Color.green()
+        color=Color.green(),
     )
     embed.add_field(
         name="How to Play",
-        value="Join the game and try to identify the imposter who doesn't know the secret word!"
+        value="Join the game and try to identify the imposter who doesn't know the secret word!",
     )
-    
+
     view = GameView(game)
     await interaction.response.send_message(embed=embed, view=view)
     message = await interaction.original_response()
     game.message_id = message.id
 
-@bot.tree.command(
-    name="start",
-    description="Start the game"
-)
+
+@bot.tree.command(name="start", description="Start the game")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def start(interaction: Interaction):
     game = game_manager.get_game(interaction.channel.id)
     settings = server_config.get_settings(str(interaction.guild.id))
-    
+
     if not game:
-        await interaction.response.send_message("No game has been set up. Use /play first!", ephemeral=True)
+        await interaction.response.send_message(
+            "No game has been set up. Use /play first!", ephemeral=True
+        )
         return
 
     if game.game_started:
-        await interaction.response.send_message("Game has already started!", ephemeral=True)
+        await interaction.response.send_message(
+            "Game has already started!", ephemeral=True
+        )
         return
 
     if len(game.joined_users) < settings.min_players:
         await interaction.response.send_message(
-            f"Need at least {settings.min_players} players to start!",
-            ephemeral=True
+            f"Need at least {settings.min_players} players to start!", ephemeral=True
         )
         return
 
@@ -470,7 +497,11 @@ async def start(interaction: Interaction):
     for user_id in game.joined_users:
         try:
             user = await bot.fetch_user(user_id)
-            message = "You are an imposter! Try to blend in!" if user_id in game.imposters else f"The word is: {game.current_word}"
+            message = (
+                "You are an imposter! Try to blend in!"
+                if user_id in game.imposters
+                else f"The word is: {game.current_word}"
+            )
             await user.send(message)
         except discord.DiscordException as e:
             print(f"Failed to send message to user {user_id}: {e}")
@@ -479,21 +510,21 @@ async def start(interaction: Interaction):
         "Game has started! Use /describe to begin the description phase."
     )
 
-@bot.tree.command(
-    name="describe",
-    description="Start the description phase"
-)
+
+@bot.tree.command(name="describe", description="Start the description phase")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def describe(interaction: Interaction):
     game = game_manager.get_game(interaction.channel.id)
     settings = server_config.get_settings(str(interaction.guild.id))
-    
+
     if not game or not game.game_started:
         await interaction.response.send_message("No active game found!", ephemeral=True)
         return
 
     if game.description_phase_started:
-        await interaction.response.send_message("Description phase already started!", ephemeral=True)
+        await interaction.response.send_message(
+            "Description phase already started!", ephemeral=True
+        )
         return
 
     game.description_phase_started = True
@@ -502,47 +533,57 @@ async def describe(interaction: Interaction):
     # Calculate dynamic timeout based on player count
     player_count = len(game.joined_users)
     base_timeout = settings.description_timeout
-    timeout_adjustment = max(0, (player_count - 5) * 10)  # Add 10 seconds per player above 5
+    timeout_adjustment = max(
+        0, (player_count - 5) * 10
+    )  # Add 10 seconds per player above 5
     adjusted_timeout = base_timeout + timeout_adjustment
 
     for round_num in range(settings.rounds):
         game.round_number = round_num + 1
         await interaction.followup.send(f"Round {game.round_number}/{settings.rounds}")
-        
+
         players = game.joined_users.copy()
         random.shuffle(players)
-        
+
         for player_id in players:
             if player_id not in game.joined_users:  # Check if player hasn't quit
                 continue
-                
+
             player = await bot.fetch_user(player_id)
             await interaction.followup.send(f"{player.mention}'s turn to describe!")
-            
+
             try:
+
                 def check(m):
-                    return m.author.id == player_id and m.channel.id == interaction.channel.id
-                
-                msg = await bot.wait_for('message', timeout=adjusted_timeout, check=check)
-                
+                    return (
+                        m.author.id == player_id
+                        and m.channel.id == interaction.channel.id
+                    )
+
+                msg = await bot.wait_for(
+                    "message", timeout=adjusted_timeout, check=check
+                )
+
                 if player_id not in game.user_descriptions:
                     game.user_descriptions[player_id] = []
                 game.user_descriptions[player_id].append(msg.content)
-                
+
             except asyncio.TimeoutError:
                 await interaction.followup.send(f"{player.mention} took too long!")
                 game.missed_rounds[player_id] = game.missed_rounds.get(player_id, 0) + 1
-                
+
                 if game.missed_rounds[player_id] >= settings.max_missed_rounds:
                     game.joined_users.remove(player_id)
-                    await interaction.followup.send(f"{player.mention} has been removed for inactivity!")
+                    await interaction.followup.send(
+                        f"{player.mention} has been removed for inactivity!"
+                    )
 
-    await interaction.followup.send("Description phase complete! Use /vote to start voting!")
+    await interaction.followup.send(
+        "Description phase complete! Use /vote to start voting!"
+    )
 
-@bot.tree.command(
-    name="vote",
-    description="Start the voting phase"
-)
+
+@bot.tree.command(name="vote", description="Start the voting phase")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def vote(interaction: Interaction):
     game = game_manager.get_game(interaction.channel.id)
@@ -551,7 +592,9 @@ async def vote(interaction: Interaction):
         return
 
     if not game.description_phase_started:
-        await interaction.response.send_message("Complete the description phase first!", ephemeral=True)
+        await interaction.response.send_message(
+            "Complete the description phase first!", ephemeral=True
+        )
         return
 
     options = []
@@ -580,10 +623,8 @@ async def vote(interaction: Interaction):
         f"Voting has started! Votes will be automatically tallied in {settings.vote_timeout} seconds."
     )
 
-@bot.tree.command(
-    name="tally",
-    description="Tally the votes"
-)
+
+@bot.tree.command(name="tally", description="Tally the votes")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def tally(interaction: Interaction):
     game = game_manager.get_game(interaction.channel.id)
@@ -594,69 +635,67 @@ async def tally(interaction: Interaction):
     if len(game.votes) < len(game.joined_users):
         remaining = len(game.joined_users) - len(game.votes)
         await interaction.response.send_message(
-            f"Still waiting for {remaining} votes!",
-            ephemeral=True
+            f"Still waiting for {remaining} votes!", ephemeral=True
         )
         return
 
     if game.vote_task:
         game.vote_task.cancel()
-    
+
     await tally_votes(interaction.channel, game)
 
+
 @bot.tree.command(
-    name="recall",
-    description="Show all descriptions given during the game"
+    name="recall", description="Show all descriptions given during the game"
 )
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def recall(interaction: Interaction):
     game = game_manager.get_game(interaction.channel.id)
     if not game or not game.description_phase_started:
-        await interaction.response.send_message("No active game with descriptions found!", ephemeral=True)
+        await interaction.response.send_message(
+            "No active game with descriptions found!", ephemeral=True
+        )
         return
 
     embed = discord.Embed(
-        title="🗣️ Game Descriptions",
-        color=Color.blue(),
-        timestamp=datetime.now()
+        title="🗣️ Game Descriptions", color=Color.blue(), timestamp=datetime.now()
     )
 
     for user_id, descriptions in game.user_descriptions.items():
         user = await bot.fetch_user(user_id)
-        desc_text = '\n'.join([f"Round {i+1}: {desc}" for i, desc in enumerate(descriptions)])
+        desc_text = "\n".join(
+            [f"Round {i+1}: {desc}" for i, desc in enumerate(descriptions)]
+        )
         embed.add_field(
             name=f"{user.name}'s Descriptions",
             value=desc_text or "No descriptions",
-            inline=False
+            inline=False,
         )
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(
-    name="status",
-    description="Show current game status"
-)
+
+@bot.tree.command(name="status", description="Show current game status")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def status(interaction: Interaction):
     game = game_manager.get_game(interaction.channel.id)
     settings = server_config.get_settings(str(interaction.guild.id))
-    
+
     if not game:
-        await interaction.response.send_message("No active game in this channel.", ephemeral=True)
+        await interaction.response.send_message(
+            "No active game in this channel.", ephemeral=True
+        )
         return
 
-    embed = discord.Embed(
-        title="Game Status",
-        color=Color.blue()
-    )
+    embed = discord.Embed(title="Game Status", color=Color.blue())
 
     # Basic game info
     embed.add_field(
         name="Game State",
         value=f"Started: {'Yes' if game.game_started else 'No'}\n"
-              f"Description Phase: {'Yes' if game.description_phase_started else 'No'}\n"
-              f"Current Round: {game.round_number}/{settings.rounds}",
-        inline=False
+        f"Description Phase: {'Yes' if game.description_phase_started else 'No'}\n"
+        f"Current Round: {game.round_number}/{settings.rounds}",
+        inline=False,
     )
 
     # Player list and voting status
@@ -666,28 +705,24 @@ async def status(interaction: Interaction):
         missed = game.missed_rounds.get(user_id, 0)
         voted = "✅" if user_id in game.voted_users else "❌"
         players.append(f"{user.name} (Missed: {missed}) {voted}")
-    
+
     embed.add_field(
         name=f"Players ({len(game.joined_users)}/{settings.max_players})",
-        value='\n'.join(players) if players else "No players yet",
-        inline=False
+        value="\n".join(players) if players else "No players yet",
+        inline=False,
     )
 
     # Game duration if started
     if game.start_time:
         duration = datetime.now() - game.start_time
         embed.add_field(
-            name="Duration",
-            value=f"{duration.seconds // 60} minutes",
-            inline=False
+            name="Duration", value=f"{duration.seconds // 60} minutes", inline=False
         )
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(
-    name="votekick",
-    description="Start a vote to kick a player"
-)
+
+@bot.tree.command(name="votekick", description="Start a vote to kick a player")
 @commands.cooldown(1, 30, commands.BucketType.user)
 async def votekick(interaction: Interaction, player: discord.Member):
     game = game_manager.get_game(interaction.channel.id)
@@ -696,22 +731,26 @@ async def votekick(interaction: Interaction, player: discord.Member):
         return
 
     if player.id not in game.joined_users:
-        await interaction.response.send_message("That player is not in the game!", ephemeral=True)
+        await interaction.response.send_message(
+            "That player is not in the game!", ephemeral=True
+        )
         return
 
     if interaction.user.id not in game.joined_users:
-        await interaction.response.send_message("You're not in the game!", ephemeral=True)
+        await interaction.response.send_message(
+            "You're not in the game!", ephemeral=True
+        )
         return
 
     view = VoteKickView(game, player.id)
     await interaction.response.send_message(
         f"Vote to kick {player.mention}? ({view.required_votes} votes needed)",
-        view=view
+        view=view,
     )
 
+
 @bot.tree.command(
-    name="settings",
-    description="Configure game settings for this server (Admin only)"
+    name="settings", description="Configure game settings for this server (Admin only)"
 )
 @commands.has_permissions(administrator=True)
 @commands.cooldown(1, 5, commands.BucketType.guild)
@@ -722,14 +761,16 @@ async def settings(
     rounds: Optional[int] = None,
     description_timeout: Optional[int] = None,
     vote_timeout: Optional[int] = None,
-    multiple_imposters: Optional[bool] = None
+    multiple_imposters: Optional[bool] = None,
 ):
     if not interaction.guild:
-        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        await interaction.response.send_message(
+            "This command can only be used in a server.", ephemeral=True
+        )
         return
 
     settings = server_config.get_settings(str(interaction.guild.id))
-    
+
     if min_players is not None:
         settings.min_players = min_players
     if max_players is not None:
@@ -748,30 +789,34 @@ async def settings(
     embed = discord.Embed(
         title="Server Game Settings",
         color=Color.green(),
-        description="Settings updated successfully!"
+        description="Settings updated successfully!",
     )
-    
+
     embed.add_field(name="Minimum Players", value=settings.min_players)
     embed.add_field(name="Maximum Players", value=settings.max_players)
     embed.add_field(name="Rounds", value=settings.rounds)
-    embed.add_field(name="Description Timeout", value=f"{settings.description_timeout}s")
+    embed.add_field(
+        name="Description Timeout", value=f"{settings.description_timeout}s"
+    )
     embed.add_field(name="Vote Timeout", value=f"{settings.vote_timeout}s")
     embed.add_field(name="Multiple Imposters", value=str(settings.multiple_imposters))
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(
-    name="request",
-    description="Request a new word to be added"
-)
+
+@bot.tree.command(name="request", description="Request a new word to be added")
 @commands.cooldown(1, 300, commands.BucketType.user)  # 5-minute cooldown
 async def request_word(interaction: Interaction, word: str):
-    success, message = await game_manager.word_manager.add_word(word, interaction.user.id)
+    success, message = await game_manager.word_manager.add_word(
+        word, interaction.user.id
+    )
     await interaction.response.send_message(message, ephemeral=True)
+
 
 @bot.tree.error
 async def on_command_error(interaction: Interaction, error: Exception):
     await ErrorHandler.handle_command_error(interaction, error)
+
 
 def run_bot(token: str):
     """Start the bot with the provided token."""
@@ -781,13 +826,14 @@ def run_bot(token: str):
         print(f"Failed to start bot: {e}")
         traceback.print_exception(type(e), e, e.__traceback__)
 
+
 if __name__ == "__main__":
     # Load environment variables from .env file
     load_dotenv()
-    
+
     # Retrieve the bot token from environment variables
     TOKEN = os.getenv("BOT_TOKEN")
-    
+
     if not TOKEN:
         print("Error: BOT_TOKEN is not set in the environment variables.")
     else:
