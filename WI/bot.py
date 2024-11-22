@@ -56,9 +56,7 @@ class ServerSettings:
     vote_timeout: int = 120
     max_missed_rounds: int = 2
     multiple_imposters: bool = False
-    imposter_ratio: float = (
-        0.25  # 25% of players will be imposters in larger games
-    )
+    imposter_ratio: float = 0.25  # 25% of players will be imposters in larger games
 
 
 class GameState:
@@ -109,37 +107,118 @@ class ServerConfig:
     def __init__(self, config_file: str = "server_config.json"):
         self.config_file = config_file
         self.settings: Dict[str, ServerSettings] = {}
+        self._ensure_config_file()
         self.load_config()
 
-    def load_config(self):
-        if os.path.exists(self.config_file):
-            with open(self.config_file, "r") as f:
-                data = json.load(f)
-                for server_id, settings in data.items():
-                    self.settings[server_id] = ServerSettings(**settings)
+    def _ensure_config_file(self):
+        """Ensure the config file exists and is valid JSON"""
+        if not os.path.exists(self.config_file):
+            with open(self.config_file, "w") as f:
+                json.dump({}, f)
+        else:
+            try:
+                with open(self.config_file, "r") as f:
+                    json.load(f)
+            except json.JSONDecodeError:
+                # Backup corrupted file and create new one
+                backup_file = f"{self.config_file}.backup"
+                os.rename(self.config_file, backup_file)
+                with open(self.config_file, "w") as f:
+                    json.dump({}, f)
 
-    def save_config(self):
-        data = {
-            server_id: {
-                "min_players": settings.min_players,
-                "max_players": settings.max_players,
-                "rounds": settings.rounds,
-                "description_timeout": settings.description_timeout,
-                "vote_timeout": settings.vote_timeout,
-                "max_missed_rounds": settings.max_missed_rounds,
-                "multiple_imposters": settings.multiple_imposters,
-                "imposter_ratio": settings.imposter_ratio,
+    def load_config(self) -> None:
+        """Load server settings from config file with error handling"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, "r") as f:
+                    data = json.load(f)
+                    for server_id, settings in data.items():
+                        try:
+                            self.settings[server_id] = ServerSettings(**settings)
+                        except TypeError as e:
+                            print(f"Error loading settings for server {server_id}: {e}")
+                            # Use default settings for invalid configurations
+                            self.settings[server_id] = ServerSettings()
+        except Exception as e:
+            print(f"Error loading config file: {e}")
+            # Use empty settings if config file can't be loaded
+            self.settings = {}
+
+    def save_config(self) -> bool:
+        """Save server settings to config file with error handling"""
+        try:
+            data = {
+                server_id: {
+                    "min_players": settings.min_players,
+                    "max_players": settings.max_players,
+                    "rounds": settings.rounds,
+                    "description_timeout": settings.description_timeout,
+                    "vote_timeout": settings.vote_timeout,
+                    "max_missed_rounds": settings.max_missed_rounds,
+                    "multiple_imposters": settings.multiple_imposters,
+                    "imposter_ratio": settings.imposter_ratio,
+                }
+                for server_id, settings in self.settings.items()
             }
-            for server_id, settings in self.settings.items()
-        }
-        with open(self.config_file, "w") as f:
-            json.dump(data, f, indent=4)
+            
+            # Write to temporary file first
+            temp_file = f"{self.config_file}.temp"
+            with open(temp_file, "w") as f:
+                json.dump(data, f, indent=4)
+            
+            # Replace original file with temporary file
+            os.replace(temp_file, self.config_file)
+            return True
+        except Exception as e:
+            print(f"Error saving config file: {e}")
+            return False
 
     def get_settings(self, server_id: str) -> ServerSettings:
+        """Get settings for a specific server, creating default if none exist"""
+        if not server_id:
+            return ServerSettings()
+        
         if server_id not in self.settings:
             self.settings[server_id] = ServerSettings()
+            self.save_config()
         return self.settings[server_id]
 
+    def update_server_settings(
+        self,
+        server_id: str,
+        **kwargs
+    ) -> tuple[bool, str]:
+        """Update settings for a specific server with validation"""
+        try:
+            settings = self.get_settings(server_id)
+            
+            # Validate numeric settings
+            if "min_players" in kwargs and "max_players" in kwargs:
+                if kwargs["min_players"] > kwargs["max_players"]:
+                    return False, "Minimum players cannot be greater than maximum players"
+            elif "min_players" in kwargs and kwargs["min_players"] > settings.max_players:
+                return False, "Minimum players cannot be greater than current maximum players"
+            elif "max_players" in kwargs and kwargs["max_players"] < settings.min_players:
+                return False, "Maximum players cannot be less than current minimum players"
+
+            # Validate timeouts
+            if "description_timeout" in kwargs and kwargs["description_timeout"] < 10:
+                return False, "Description timeout must be at least 10 seconds"
+            if "vote_timeout" in kwargs and kwargs["vote_timeout"] < 10:
+                return False, "Vote timeout must be at least 10 seconds"
+
+            # Update settings
+            for key, value in kwargs.items():
+                if hasattr(settings, key):
+                    setattr(settings, key, value)
+
+            # Save changes
+            if not self.save_config():
+                return False, "Failed to save settings"
+
+            return True, "Settings updated successfully"
+        except Exception as e:
+            return False, f"Error updating settings: {e}"
 
 class WordManager:
     def __init__(
@@ -931,6 +1010,15 @@ async def votekick(interaction: Interaction, player: discord.Member):
     name="settings",
     description="Configure game settings for this server (Admin only)",
 )
+@app_commands.describe(
+    min_players="Minimum number of players required to start a game",
+    max_players="Maximum number of players allowed in a game",
+    rounds="Number of rounds per game",
+    description_timeout="Time in seconds for players to write descriptions",
+    vote_timeout="Time in seconds for players to vote",
+    multiple_imposters="Allow multiple imposters in larger games",
+    imposter_ratio="Percentage of players that will be imposters (enter as whole number: 20 for 20%)",
+)
 @commands.has_permissions(administrator=True)
 @commands.cooldown(1, 5, commands.BucketType.guild)
 async def settings(
@@ -941,6 +1029,7 @@ async def settings(
     description_timeout: Optional[int] = None,
     vote_timeout: Optional[int] = None,
     multiple_imposters: Optional[bool] = None,
+    imposter_ratio: Optional[float] = None,
 ):
     if not interaction.guild:
         await interaction.response.send_message(
@@ -948,22 +1037,47 @@ async def settings(
         )
         return
 
-    settings = server_config.get_settings(str(interaction.guild.id))
+    # Validate imposter ratio if provided
+    if imposter_ratio is not None:
+        if imposter_ratio <= 0 or imposter_ratio > 50:
+            await interaction.response.send_message(
+                "Imposter ratio must be between 1 and 50 (enter as whole number, e.g., 20 for 20%)", 
+                ephemeral=True
+            )
+            return
 
+    # Collect only provided settings
+    update_settings = {}
     if min_players is not None:
-        settings.min_players = min_players
+        update_settings["min_players"] = min_players
     if max_players is not None:
-        settings.max_players = max_players
+        update_settings["max_players"] = max_players
     if rounds is not None:
-        settings.rounds = rounds
+        update_settings["rounds"] = rounds
     if description_timeout is not None:
-        settings.description_timeout = description_timeout
+        update_settings["description_timeout"] = description_timeout
     if vote_timeout is not None:
-        settings.vote_timeout = vote_timeout
+        update_settings["vote_timeout"] = vote_timeout
     if multiple_imposters is not None:
-        settings.multiple_imposters = multiple_imposters
+        update_settings["multiple_imposters"] = multiple_imposters
+    if imposter_ratio is not None:
+        # Convert percentage to decimal (e.g., 25 -> 0.25)
+        update_settings["imposter_ratio"] = imposter_ratio / 100
 
-    server_config.save_config()
+    # Update settings
+    success, message = server_config.update_server_settings(
+        str(interaction.guild.id),
+        **update_settings
+    )
+
+    if not success:
+        await interaction.response.send_message(
+            f"Failed to update settings: {message}", ephemeral=True
+        )
+        return
+
+    # Get updated settings for display
+    settings = server_config.get_settings(str(interaction.guild.id))
 
     embed = discord.Embed(
         title="Server Game Settings",
@@ -981,9 +1095,11 @@ async def settings(
     embed.add_field(
         name="Multiple Imposters", value=str(settings.multiple_imposters)
     )
+    embed.add_field(
+        name="Imposter Ratio", value=f"{settings.imposter_ratio * 100:.0f}%"
+    )
 
     await interaction.response.send_message(embed=embed)
-
 
 @bot.tree.command(name="request", description="Request a new word to be added")
 @commands.cooldown(1, 300, commands.BucketType.user)  # 5-minute cooldown
