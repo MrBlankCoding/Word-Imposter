@@ -18,8 +18,12 @@ intents = Intents.default()
 intents.message_content = True
 intents.members = True
 
-# Bot initialization
-bot = commands.Bot(command_prefix="/", intents=intents)
+# Bot initialization moved to a function
+def init_bot():
+    return commands.Bot(command_prefix="/", intents=intents)
+
+# Create bot instance
+bot = init_bot()
 
 
 class ErrorHandler:
@@ -336,17 +340,6 @@ class GameManager:
 
 game_manager = GameManager()
 server_config = ServerConfig()
-
-
-@bot.event
-async def on_ready():
-    print(f"{bot.user} is ready and online!")
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
-
 
 async def auto_tally_votes(game: GameState, channel):
     try:
@@ -904,11 +897,18 @@ async def request_word(interaction: Interaction, word: str):
     )
     await interaction.response.send_message(message, ephemeral=True)
 
+@bot.event
+async def on_ready():
+    print(f"{bot.user} is ready and online!")
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
 
 @bot.tree.error
 async def on_command_error(interaction: Interaction, error: Exception):
     await ErrorHandler.handle_command_error(interaction, error)
-
 
 def run_bot(token: str):
     """Start the bot with the provided token."""
@@ -917,16 +917,3 @@ def run_bot(token: str):
     except Exception as e:
         print(f"Failed to start bot: {e}")
         traceback.print_exception(type(e), e, e.__traceback__)
-
-
-if __name__ == "__main__":
-    # Load environment variables from .env file
-    load_dotenv()
-
-    # Retrieve the bot token from environment variables
-    TOKEN = os.getenv("BOT_TOKEN")
-
-    if not TOKEN:
-        print("Error: BOT_TOKEN is not set in the environment variables.")
-    else:
-        run_bot(TOKEN)

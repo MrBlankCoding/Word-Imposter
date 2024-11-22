@@ -1,3 +1,5 @@
+flask
 discord.py
-better-profanity
 python-dotenv
+better-profanity
+gunicorn
