@@ -1010,15 +1010,6 @@ async def votekick(interaction: Interaction, player: discord.Member):
     name="settings",
     description="Configure game settings for this server (Admin only)",
 )
-@app_commands.describe(
-    min_players="Minimum number of players required to start a game",
-    max_players="Maximum number of players allowed in a game",
-    rounds="Number of rounds per game",
-    description_timeout="Time in seconds for players to write descriptions",
-    vote_timeout="Time in seconds for players to vote",
-    multiple_imposters="Allow multiple imposters in larger games",
-    imposter_ratio="Percentage of players that will be imposters (enter as whole number: 20 for 20%)",
-)
 @commands.has_permissions(administrator=True)
 @commands.cooldown(1, 5, commands.BucketType.guild)
 async def settings(
@@ -1036,15 +1027,6 @@ async def settings(
             "This command can only be used in a server.", ephemeral=True
         )
         return
-
-    # Validate imposter ratio if provided
-    if imposter_ratio is not None:
-        if imposter_ratio <= 0 or imposter_ratio > 50:
-            await interaction.response.send_message(
-                "Imposter ratio must be between 1 and 50 (enter as whole number, e.g., 20 for 20%)", 
-                ephemeral=True
-            )
-            return
 
     # Collect only provided settings
     update_settings = {}
