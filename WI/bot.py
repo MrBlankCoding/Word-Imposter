@@ -27,26 +27,6 @@ def init_bot():
 bot = init_bot()
 
 
-class ErrorHandler:
-    @staticmethod
-    async def handle_command_error(interaction: Interaction, error: Exception):
-        error_message = "An unexpected error occurred! Please try again later."
-        if isinstance(error, commands.MissingPermissions):
-            error_message = "You don't have permission to use this command!"
-        elif isinstance(error, commands.CommandOnCooldown):
-            error_message = f"Please wait {error.retry_after:.1f}s before using this command again."
-
-        try:
-            await interaction.response.send_message(
-                error_message, ephemeral=True
-            )
-        except discord.InteractionResponded:
-            await interaction.followup.send(error_message, ephemeral=True)
-
-        print(f"Error in {interaction.command.name}: {str(error)}")
-        traceback.print_exception(type(error), error, error.__traceback__)
-
-
 @dataclass
 class ServerSettings:
     min_players: int = 1
