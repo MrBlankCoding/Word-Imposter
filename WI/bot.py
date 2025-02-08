@@ -102,6 +102,31 @@ class GameState:
             self.vote_task.cancel()
         self.__init__()
 
+class ErrorHandler:
+    @staticmethod
+    async def handle_command_error(interaction: Interaction, error: Exception):
+        try:
+            if not interaction.response.is_done():
+                error_message = "An error occurred while processing your command."
+                if isinstance(error, commands.CommandOnCooldown):
+                    error_message = f"This command is on cooldown. Try again in {error.retry_after:.1f} seconds."
+                elif isinstance(error, commands.errors.MissingPermissions):
+                    error_message = "You don't have permission to use this command."
+                
+                await interaction.response.send_message(error_message, ephemeral=True)
+            else:
+                # If interaction is already responded to, try using followup
+                try:
+                    await interaction.followup.send("An error occurred while processing your command.", ephemeral=True)
+                except discord.errors.HTTPException:
+                    # If followup fails, the interaction might be completely invalid
+                    print(f"Failed to send error message for interaction {interaction.id}")
+        except Exception as e:
+            print(f"Error in error handler: {str(e)}")
+        finally:
+            # Log the original error
+            print(f"Command error occurred: {str(error)}")
+
 
 class ServerConfig:
     def __init__(self, config_file: str = "server_config.json"):
@@ -416,60 +441,145 @@ class VotingDropdown(discord.ui.Select):
 class StartGameButton(discord.ui.Button):
     def __init__(self, game: GameState):
         super().__init__(
-            style=ButtonStyle.green, label="Start Game", disabled=True
+            style=ButtonStyle.green, 
+            label="Start Game", 
+            disabled=True  # Start disabled until minimum players join
         )
         self.game = game
 
     async def callback(self, interaction: Interaction):
-        settings = server_config.get_settings(str(interaction.guild.id))
+        try:
+            await interaction.response.defer()  # Defer immediately to prevent timeout
+            
+            settings = server_config.get_settings(str(interaction.guild.id))
 
-        if len(self.game.joined_users) < settings.min_players:
-            await interaction.response.send_message(
-                f"Need at least {settings.min_players} players to start!",
-                ephemeral=True,
-            )
-            return
+            if len(self.game.joined_users) < settings.min_players:
+                await interaction.followup.send(
+                    f"Need at least {settings.min_players} players to start!",
+                    ephemeral=True,
+                )
+                return
 
-        await start_game(interaction, self.game)
+            if self.game.game_started:  # Prevent double-starts
+                await interaction.followup.send(
+                    "Game has already started!",
+                    ephemeral=True,
+                )
+                return
+
+            self.disabled = True  # Disable button before starting
+            await interaction.message.edit(view=self.view)
+            await start_game(interaction, self.game)
+
+        except discord.errors.NotFound:
+            print(f"Interaction {interaction.id} expired in start button callback")
+        except Exception as e:
+            print(f"Error in start game button callback: {str(e)}")
+            try:
+                await interaction.followup.send(
+                    "An error occurred while starting the game.", 
+                    ephemeral=True
+                )
+            except discord.errors.HTTPException:
+                print(f"Failed to send error message for interaction {interaction.id}")
 
 
 class GameView(discord.ui.View):
     def __init__(self, game: GameState):
-        super().__init__()
+        super().__init__(timeout=3600)  # 1 hour timeout
         self.game = game
         self.start_button = StartGameButton(game)
         self.add_item(self.start_button)
 
+    async def on_timeout(self):
+        try:
+            # Disable all buttons
+            for item in self.children:
+                item.disabled = True
+            
+            # Try to edit the message with disabled view
+            channel = bot.get_channel(self.game.channel_id)
+            if channel:
+                try:
+                    message = await channel.fetch_message(self.game.message_id)
+                    if message:
+                        await message.edit(view=self)
+                except discord.NotFound:
+                    print(f"Message {self.game.message_id} not found during timeout")
+            
+            # Clean up the game
+            game_manager.end_game(self.game.channel_id)
+        except Exception as e:
+            print(f"Error in view timeout handler: {str(e)}")
+
     @discord.ui.button(label="Join Game", style=ButtonStyle.green)
     async def join_button(self, interaction: Interaction, button: discord.ui.Button):
-        await interaction.response.defer()  # Defer to avoid expiration
+        try:
+            await interaction.response.defer()
 
-        settings = server_config.get_settings(str(interaction.guild_id))
+            settings = server_config.get_settings(str(interaction.guild_id))
 
-        if len(self.game.joined_users) >= settings.max_players:
-            await interaction.followup.send(
-                f"Game is full! Maximum {settings.max_players} players allowed.",
-                ephemeral=True,
-            )
-            return
+            # Check if game is still valid
+            if not game_manager.get_game(interaction.channel_id):
+                await interaction.followup.send(
+                    "This game is no longer active.", 
+                    ephemeral=True
+                )
+                return
 
-        if interaction.user.id in self.game.joined_users:
-            await interaction.followup.send("You've already joined!", ephemeral=True)
-            return
+            if self.game.game_started:
+                await interaction.followup.send(
+                    "Game has already started!", 
+                    ephemeral=True
+                )
+                return
 
-        self.game.joined_users.append(interaction.user.id)
-        embed = interaction.message.embeds[0]
-        embed.description = f"Players joined: {len(self.game.joined_users)}/{settings.max_players}"
+            if len(self.game.joined_users) >= settings.max_players:
+                await interaction.followup.send(
+                    f"Game is full! Maximum {settings.max_players} players allowed.",
+                    ephemeral=True,
+                )
+                return
 
-        # Enable start button if minimum players reached
-        if len(self.game.joined_users) >= settings.min_players:
-            self.start_button.disabled = False
+            if interaction.user.id in self.game.joined_users:
+                await interaction.followup.send(
+                    "You've already joined!", 
+                    ephemeral=True
+                )
+                return
 
-        # Explicitly update the message UI
-        await interaction.message.edit(embed=embed, view=self)
+            # Update game state
+            self.game.joined_users.append(interaction.user.id)
+            
+            # Update embed
+            try:
+                embed = interaction.message.embeds[0].copy()
+                embed.description = f"Players joined: {len(self.game.joined_users)}/{settings.max_players}"
 
-        await interaction.followup.send("You've joined the game!", ephemeral=True)
+                # Enable start button if minimum players reached
+                if len(self.game.joined_users) >= settings.min_players:
+                    self.start_button.disabled = False
 
+                await interaction.message.edit(embed=embed, view=self)
+                await interaction.followup.send("You've joined the game!", ephemeral=True)
+
+            except discord.errors.NotFound:
+                print(f"Failed to update message {interaction.message.id}")
+                game_manager.end_game(interaction.channel_id)
+                await interaction.followup.send(
+                    "An error occurred. Please start a new game.", 
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            print(f"Error in join button callback: {str(e)}")
+            try:
+                await interaction.followup.send(
+                    "An error occurred while joining the game.", 
+                    ephemeral=True
+                )
+            except discord.errors.HTTPException:
+                print(f"Failed to send error message for interaction {interaction.id}")
 
 
 class GameManager:
@@ -477,28 +587,35 @@ class GameManager:
         self.games: Dict[int, GameState] = {}
         self.word_manager = WordManager()
         self.used_channels: Set[int] = set()
+        self._lock = asyncio.Lock()  # Add lock for thread safety
 
-    def get_game(self, channel_id: int) -> Optional[GameState]:
-        return self.games.get(channel_id)
+    async def get_game(self, channel_id: int) -> Optional[GameState]:
+        async with self._lock:
+            return self.games.get(channel_id)
 
-    def create_game(self, channel_id: int) -> GameState:
-        game = GameState()
-        game.channel_id = channel_id
-        self.games[channel_id] = game
-        self.used_channels.add(channel_id)
-        return game
+    async def create_game(self, channel_id: int) -> GameState:
+        async with self._lock:
+            if channel_id in self.used_channels:
+                raise ValueError("Channel already has an active game")
+            
+            game = GameState()
+            game.channel_id = channel_id
+            self.games[channel_id] = game
+            self.used_channels.add(channel_id)
+            return game
 
-    def end_game(self, channel_id: int):
-        if channel_id in self.games:
-            self.games[channel_id].reset()
-            del self.games[channel_id]
-            self.used_channels.discard(channel_id)  # <-- Remove channel from used channels
+    async def end_game(self, channel_id: int):
+        async with self._lock:
+            if channel_id in self.games:
+                self.games[channel_id].reset()
+                del self.games[channel_id]
+                self.used_channels.discard(channel_id)
 
+    async def can_create_game(self, channel_id: int) -> bool:
+        async with self._lock:
+            return channel_id not in self.used_channels
 
-    def can_create_game(self, channel_id: int) -> bool:
-        return channel_id not in self.used_channels
-
-
+# Initialize managers
 game_manager = GameManager()
 server_config = ServerConfig()
 
@@ -588,35 +705,52 @@ async def tally_votes(channel, game: GameState):
 @bot.tree.command(name="play", description="Start a new game of Word Imposter")
 @commands.cooldown(1, 30, commands.BucketType.channel)
 async def play(interaction: Interaction):
-    if not interaction.guild or not interaction.channel:
-        await interaction.response.send_message(
-            "This command can only be used in a server channel.", ephemeral=True
+    try:
+        # Defer the response immediately to prevent timeout
+        await interaction.response.defer()
+
+        if not interaction.guild or not interaction.channel:
+            await interaction.followup.send(
+                "This command can only be used in a server channel.", ephemeral=True
+            )
+            return
+
+        if not game_manager.can_create_game(interaction.channel.id):
+            await interaction.followup.send(
+                "A game has already been started in this channel!", ephemeral=True
+            )
+            return
+
+        game = game_manager.create_game(interaction.channel.id)
+        settings = server_config.get_settings(str(interaction.guild_id))
+
+        embed = discord.Embed(
+            title="Word Imposter",
+            description=f"Players joined: 0/{settings.max_players}",
+            color=Color.green(),
         )
-        return
-
-    if not game_manager.can_create_game(interaction.channel.id):
-        await interaction.response.send_message(
-            "A game has already been started in this channel!", ephemeral=True
+        embed.add_field(
+            name="How to Play",
+            value="Join the game and try to identify the imposter who doesn't know the secret word!",
         )
-        return
 
-    game = game_manager.create_game(interaction.channel.id)
-    settings = server_config.get_settings(str(interaction.guild_id))
+        view = GameView(game)
+        await interaction.followup.send(embed=embed, view=view)
+        message = await interaction.followup.fetch_message('@original')
+        game.message_id = message.id
 
-    embed = discord.Embed(
-        title="Word Imposter",
-        description=f"Players joined: 0/{settings.max_players}",
-        color=Color.green(),
-    )
-    embed.add_field(
-        name="How to Play",
-        value="Join the game and try to identify the imposter who doesn't know the secret word!",
-    )
+    except discord.errors.NotFound:
+        print(f"Interaction {interaction.id} expired before response")
+    except Exception as e:
+        print(f"Error in play command: {str(e)}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("An error occurred while starting the game.", ephemeral=True)
+        else:
+            try:
+                await interaction.followup.send("An error occurred while starting the game.", ephemeral=True)
+            except discord.errors.HTTPException:
+                print(f"Failed to send error message for interaction {interaction.id}")
 
-    view = GameView(game)
-    await interaction.response.send_message(embed=embed, view=view)
-    message = await interaction.original_response()
-    game.message_id = message.id
 
 
 async def start_game(interaction: Interaction, game: GameState):
