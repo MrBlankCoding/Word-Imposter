@@ -585,7 +585,6 @@ async def tally_votes(channel, game: GameState):
     )
     game_manager.end_game(channel.id)
 
-
 @bot.tree.command(name="play", description="Start a new game of Word Imposter")
 @commands.cooldown(1, 30, commands.BucketType.channel)
 async def play(interaction: Interaction):
@@ -621,7 +620,8 @@ async def play(interaction: Interaction):
 
 
 async def start_game(interaction: Interaction, game: GameState):
-    await interaction.response.defer()  # Prevents interaction expiration
+    # We're already deferring the response here
+    await interaction.response.defer()
 
     settings = server_config.get_settings(str(interaction.guild.id))
 
@@ -637,49 +637,54 @@ async def start_game(interaction: Interaction, game: GameState):
     game.imposters = set(imposters)
     game.current_word = game_manager.word_manager.get_random_word()
 
+    # Send DMs to players
+    dm_tasks = []
     for user_id in game.joined_users:
         try:
             user = await bot.fetch_user(user_id)
             message = "You are an imposter! Try to blend in!" if user_id in game.imposters else f"The word is: {game.current_word}"
-            await user.send(message)
+            dm_tasks.append(user.send(message))
         except discord.DiscordException as e:
             print(f"Failed to send message to user {user_id}: {e}")
+    
+    # Wait for all DMs to be sent
+    if dm_tasks:
+        await asyncio.gather(*dm_tasks, return_exceptions=True)
 
-    # Disable the Start Game button after game starts
+    # Disable the Start Game button
     game_view = GameView(game)
     game_view.start_button.disabled = True
-    await interaction.message.edit(view=game_view)  # Ensure UI updates
+    await interaction.message.edit(view=game_view)
 
+    # Use followup since we deferred earlier
     await interaction.followup.send("Game has started! Description phase beginning...")
-
-    await asyncio.sleep(2)  # Give players time to read their roles
+    
+    # Give players time to read their roles
+    await asyncio.sleep(2)
+    
+    # Start description phase
     await start_description_phase(interaction, game)
 
 
-import asyncio
-import random
-from datetime import datetime
-import discord
-from discord import Interaction, SelectOption, Color
-from discord.ext import commands
-
 async def start_description_phase(interaction: Interaction, game: GameState):
+    # No need to send response here since we're using followup
     settings = server_config.get_settings(str(interaction.guild.id))
 
     game.description_phase_started = True
-    await interaction.response.send_message("Description phase starting!")  # Send initial message
-
+    
     # Calculate dynamic timeout based on player count
     player_count = len(game.joined_users)
     base_timeout = settings.description_timeout
     timeout_adjustment = max(0, (player_count - 5) * 10)
     adjusted_timeout = base_timeout + timeout_adjustment
 
+    await interaction.followup.send("Description phase starting!")
+
     for round_num in range(settings.rounds):
         game.round_number = round_num + 1
         await interaction.followup.send(f"Round {game.round_number}/{settings.rounds}")
 
-        players = game.joined_users.copy()
+        players = list(game.joined_users)
         random.shuffle(players)
 
         for player_id in players:
@@ -722,7 +727,7 @@ async def start_description_phase(interaction: Interaction, game: GameState):
 @bot.tree.command(name="vote", description="Start the voting phase")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def vote(interaction: Interaction):
-    await interaction.response.defer()  # Defer response to prevent timeout
+    await interaction.response.defer()
 
     game = game_manager.get_game(interaction.channel.id)
     if not game or not game.game_started:
@@ -740,14 +745,19 @@ async def vote(interaction: Interaction):
 
     game.vote_message_sent = datetime.now()
 
+    # Send voting messages in parallel
+    dm_tasks = []
     for user_id in game.joined_users:
         try:
             user = await bot.fetch_user(user_id)
             view = discord.ui.View()
             view.add_item(VotingDropdown(game, options))
-            await user.send("Vote for who you think is the imposter:", view=view)
+            dm_tasks.append(user.send("Vote for who you think is the imposter:", view=view))
         except discord.DiscordException as e:
             print(f"Failed to send voting message to {user_id}: {e}")
+
+    if dm_tasks:
+        await asyncio.gather(*dm_tasks, return_exceptions=True)
 
     await interaction.followup.send("Voting has started! Results will be shown when everyone has voted.")
 
