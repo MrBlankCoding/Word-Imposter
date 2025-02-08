@@ -493,6 +493,8 @@ class GameManager:
         if channel_id in self.games:
             self.games[channel_id].reset()
             del self.games[channel_id]
+            self.used_channels.discard(channel_id)  # <-- Remove channel from used channels
+
 
     def can_create_game(self, channel_id: int) -> bool:
         return channel_id not in self.used_channels
