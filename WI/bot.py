@@ -441,22 +441,20 @@ class GameView(discord.ui.View):
         self.add_item(self.start_button)
 
     @discord.ui.button(label="Join Game", style=ButtonStyle.green)
-    async def join_button(
-        self, interaction: Interaction, button: discord.ui.Button
-    ):
+    async def join_button(self, interaction: Interaction, button: discord.ui.Button):
+        await interaction.response.defer()  # Defer to avoid expiration
+
         settings = server_config.get_settings(str(interaction.guild_id))
 
         if len(self.game.joined_users) >= settings.max_players:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Game is full! Maximum {settings.max_players} players allowed.",
                 ephemeral=True,
             )
             return
 
         if interaction.user.id in self.game.joined_users:
-            await interaction.response.send_message(
-                "You've already joined!", ephemeral=True
-            )
+            await interaction.followup.send("You've already joined!", ephemeral=True)
             return
 
         self.game.joined_users.append(interaction.user.id)
@@ -467,10 +465,11 @@ class GameView(discord.ui.View):
         if len(self.game.joined_users) >= settings.min_players:
             self.start_button.disabled = False
 
-        await interaction.message.edit(view=self)
-        await interaction.response.send_message(
-            "You've joined the game!", ephemeral=True
-        )
+        # Explicitly update the message UI
+        await interaction.message.edit(embed=embed, view=self)
+
+        await interaction.followup.send("You've joined the game!", ephemeral=True)
+
 
 
 class GameManager:
@@ -622,25 +621,22 @@ async def play(interaction: Interaction):
 
 
 async def start_game(interaction: Interaction, game: GameState):
-    await interaction.response.defer()  # Defers interaction to prevent timeout
-    
+    await interaction.response.defer()  # Prevents interaction expiration
+
     settings = server_config.get_settings(str(interaction.guild.id))
 
     game.game_started = True
     game.start_time = datetime.now()
 
-    # Calculate number of imposters based on player count and settings
     if settings.multiple_imposters and len(game.joined_users) >= 6:
         num_imposters = max(1, int(len(game.joined_users) * settings.imposter_ratio))
     else:
         num_imposters = 1
 
-    # Select imposters
     imposters = random.sample(game.joined_users, num_imposters)
     game.imposters = set(imposters)
     game.current_word = game_manager.word_manager.get_random_word()
 
-    # Send word information to players
     for user_id in game.joined_users:
         try:
             user = await bot.fetch_user(user_id)
@@ -649,20 +645,29 @@ async def start_game(interaction: Interaction, game: GameState):
         except discord.DiscordException as e:
             print(f"Failed to send message to user {user_id}: {e}")
 
-    # Send final response (must be done since we deferred earlier)
+    # Disable the Start Game button after game starts
+    game_view = GameView(game)
+    game_view.start_button.disabled = True
+    await interaction.message.edit(view=game_view)  # Ensure UI updates
+
     await interaction.followup.send("Game has started! Description phase beginning...")
 
-    # Automatically start description phase
     await asyncio.sleep(2)  # Give players time to read their roles
     await start_description_phase(interaction, game)
 
 
+import asyncio
+import random
+from datetime import datetime
+import discord
+from discord import Interaction, SelectOption, Color
+from discord.ext import commands
 
 async def start_description_phase(interaction: Interaction, game: GameState):
     settings = server_config.get_settings(str(interaction.guild.id))
 
     game.description_phase_started = True
-    await interaction.channel.send("Description phase starting!")
+    await interaction.response.send_message("Description phase starting!")  # Send initial message
 
     # Calculate dynamic timeout based on player count
     player_count = len(game.joined_users)
@@ -672,9 +677,7 @@ async def start_description_phase(interaction: Interaction, game: GameState):
 
     for round_num in range(settings.rounds):
         game.round_number = round_num + 1
-        await interaction.channel.send(
-            f"Round {game.round_number}/{settings.rounds}"
-        )
+        await interaction.followup.send(f"Round {game.round_number}/{settings.rounds}")
 
         players = game.joined_users.copy()
         random.shuffle(players)
@@ -684,12 +687,9 @@ async def start_description_phase(interaction: Interaction, game: GameState):
                 continue
 
             player = await bot.fetch_user(player_id)
-            await interaction.channel.send(
-                f"{player.mention}'s turn to describe!"
-            )
+            await interaction.followup.send(f"{player.mention}'s turn to describe!")
 
             try:
-
                 def check(m):
                     return (
                         m.author.id == player_id
@@ -705,22 +705,18 @@ async def start_description_phase(interaction: Interaction, game: GameState):
                 game.user_descriptions[player_id].append(msg.content)
 
             except asyncio.TimeoutError:
-                await interaction.channel.send(
-                    f"{player.mention} took too long!"
-                )
+                await interaction.followup.send(f"{player.mention} took too long!")
                 game.missed_rounds[player_id] = (
                     game.missed_rounds.get(player_id, 0) + 1
                 )
 
                 if game.missed_rounds[player_id] >= settings.max_missed_rounds:
                     game.joined_users.remove(player_id)
-                    await interaction.channel.send(
+                    await interaction.followup.send(
                         f"{player.mention} has been removed for inactivity!"
                     )
 
-    await interaction.channel.send(
-        "Description phase complete! Use /vote to start voting!"
-    )
+    await interaction.followup.send("Description phase complete! Use /vote to start voting!")
 
 
 @bot.tree.command(name="vote", description="Start the voting phase")
@@ -761,9 +757,11 @@ async def vote(interaction: Interaction):
 )
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def recall(interaction: Interaction):
+    await interaction.response.defer()  # Defer response to prevent timeout
+
     game = game_manager.get_game(interaction.channel.id)
     if not game or not game.description_phase_started:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "No active game with descriptions found!", ephemeral=True
         )
         return
@@ -785,8 +783,7 @@ async def recall(interaction: Interaction):
             inline=False,
         )
 
-    await interaction.response.send_message(embed=embed)
-
+    await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="forcequit", description="Force stop all active games in case of issues")
 @commands.has_permissions(administrator=True)
