@@ -798,6 +798,17 @@ async def recall(interaction: Interaction):
     await interaction.response.send_message(embed=embed)
 
 
+@bot.tree.command(name="forcequit", description="Force stop all active games in case of issues")
+@commands.has_permissions(administrator=True)
+async def forcequit(interaction: Interaction):
+    game_manager.games.clear()  # Remove all active games
+    game_manager.used_channels.clear()  # Allow new games in all channels
+    
+    await interaction.response.send_message(
+        "All games have been forcefully stopped. You can now start a new game.", ephemeral=True
+    )
+
+
 @bot.tree.command(
     name="rules", description="Show the rules and how to play Word Imposter"
 )
