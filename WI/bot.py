@@ -86,27 +86,26 @@ class ErrorHandler:
     @staticmethod
     async def handle_command_error(interaction: Interaction, error: Exception):
         try:
-            if not interaction.response.is_done():
-                error_message = "An error occurred while processing your command."
-                if isinstance(error, commands.CommandOnCooldown):
-                    error_message = f"This command is on cooldown. Try again in {error.retry_after:.1f} seconds."
-                elif isinstance(error, commands.errors.MissingPermissions):
-                    error_message = "You don't have permission to use this command."
-                
-                await interaction.response.send_message(error_message, ephemeral=True)
-            else:
-                # If interaction is already responded to, try using followup
-                try:
-                    await interaction.followup.send("An error occurred while processing your command.", ephemeral=True)
-                except discord.errors.HTTPException:
-                    # If followup fails, the interaction might be completely invalid
+            error_message = "An error occurred while processing your command."
+            
+            if isinstance(error, commands.CommandOnCooldown):
+                error_message = f"This command is on cooldown. Try again in {error.retry_after:.1f} seconds."
+            elif isinstance(error, commands.errors.MissingPermissions):
+                error_message = "You don't have permission to use this command."
+            
+            # Try followup first since we're now deferring all interactions
+            try:
+                await interaction.followup.send(error_message, ephemeral=True)
+            except discord.errors.HTTPException:
+                # If followup fails and interaction hasn't been responded to, try response
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(error_message, ephemeral=True)
+                else:
                     print(f"Failed to send error message for interaction {interaction.id}")
         except Exception as e:
             print(f"Error in error handler: {str(e)}")
         finally:
-            # Log the original error
             print(f"Command error occurred: {str(error)}")
-
 
 class ServerConfig:
     def __init__(self, config_file: str = "server_config.json"):
@@ -499,8 +498,9 @@ class GameView(discord.ui.View):
 
             settings = server_config.get_settings(str(interaction.guild_id))
 
-            # Check if game is still valid
-            if not game_manager.get_game(interaction.channel_id):
+            # Properly await the async method
+            game = await game_manager.get_game(interaction.channel_id)
+            if not game:
                 await interaction.followup.send(
                     "This game is no longer active.", 
                     ephemeral=True
@@ -528,15 +528,12 @@ class GameView(discord.ui.View):
                 )
                 return
 
-            # Update game state
             self.game.joined_users.append(interaction.user.id)
             
-            # Update embed
             try:
                 embed = interaction.message.embeds[0].copy()
                 embed.description = f"Players joined: {len(self.game.joined_users)}/{settings.max_players}"
 
-                # Enable start button if minimum players reached
                 if len(self.game.joined_users) >= settings.min_players:
                     self.start_button.disabled = False
 
@@ -545,7 +542,7 @@ class GameView(discord.ui.View):
 
             except discord.errors.NotFound:
                 print(f"Failed to update message {interaction.message.id}")
-                game_manager.end_game(interaction.channel_id)
+                await game_manager.end_game(interaction.channel_id)
                 await interaction.followup.send(
                     "An error occurred. Please start a new game.", 
                     ephemeral=True
@@ -686,7 +683,7 @@ async def tally_votes(channel, game: GameState):
 @commands.cooldown(1, 30, commands.BucketType.channel)
 async def play(interaction: Interaction):
     try:
-        # Defer the response immediately to prevent timeout
+        # Defer immediately to prevent timeout
         await interaction.response.defer()
 
         if not interaction.guild or not interaction.channel:
@@ -695,13 +692,15 @@ async def play(interaction: Interaction):
             )
             return
 
-        if not game_manager.can_create_game(interaction.channel.id):
+        # Properly await the async method
+        if not await game_manager.can_create_game(interaction.channel.id):
             await interaction.followup.send(
                 "A game has already been started in this channel!", ephemeral=True
             )
             return
 
-        game = game_manager.create_game(interaction.channel.id)
+        # Properly await the async method
+        game = await game_manager.create_game(interaction.channel.id)
         settings = server_config.get_settings(str(interaction.guild_id))
 
         embed = discord.Embed(
@@ -715,23 +714,15 @@ async def play(interaction: Interaction):
         )
 
         view = GameView(game)
-        await interaction.followup.send(embed=embed, view=view)
-        message = await interaction.followup.fetch_message('@original')
+        message = await interaction.followup.send(embed=embed, view=view)
         game.message_id = message.id
 
-    except discord.errors.NotFound:
-        print(f"Interaction {interaction.id} expired before response")
     except Exception as e:
         print(f"Error in play command: {str(e)}")
-        if not interaction.response.is_done():
-            await interaction.response.send_message("An error occurred while starting the game.", ephemeral=True)
-        else:
-            try:
-                await interaction.followup.send("An error occurred while starting the game.", ephemeral=True)
-            except discord.errors.HTTPException:
-                print(f"Failed to send error message for interaction {interaction.id}")
-
-
+        try:
+            await interaction.followup.send("An error occurred while creating the game.", ephemeral=True)
+        except discord.errors.HTTPException:
+            print(f"Failed to send error message for interaction {interaction.id}")
 
 async def start_game(interaction: Interaction, game: GameState):
     # We're already deferring the response here
