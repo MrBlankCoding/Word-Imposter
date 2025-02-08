@@ -467,7 +467,7 @@ class GameView(discord.ui.View):
         if len(self.game.joined_users) >= settings.min_players:
             self.start_button.disabled = False
 
-        await interaction.message.edit(embed=embed, view=self)
+        await interaction.message.edit(view=self)
         await interaction.response.send_message(
             "You've joined the game!", ephemeral=True
         )
@@ -622,6 +622,8 @@ async def play(interaction: Interaction):
 
 
 async def start_game(interaction: Interaction, game: GameState):
+    await interaction.response.defer()  # Defers interaction to prevent timeout
+    
     settings = server_config.get_settings(str(interaction.guild.id))
 
     game.game_started = True
@@ -629,9 +631,7 @@ async def start_game(interaction: Interaction, game: GameState):
 
     # Calculate number of imposters based on player count and settings
     if settings.multiple_imposters and len(game.joined_users) >= 6:
-        num_imposters = max(
-            1, int(len(game.joined_users) * settings.imposter_ratio)
-        )
+        num_imposters = max(1, int(len(game.joined_users) * settings.imposter_ratio))
     else:
         num_imposters = 1
 
@@ -644,22 +644,18 @@ async def start_game(interaction: Interaction, game: GameState):
     for user_id in game.joined_users:
         try:
             user = await bot.fetch_user(user_id)
-            message = (
-                "You are an imposter! Try to blend in!"
-                if user_id in game.imposters
-                else f"The word is: {game.current_word}"
-            )
+            message = "You are an imposter! Try to blend in!" if user_id in game.imposters else f"The word is: {game.current_word}"
             await user.send(message)
         except discord.DiscordException as e:
             print(f"Failed to send message to user {user_id}: {e}")
 
-    await interaction.response.send_message(
-        "Game has started! Description phase beginning..."
-    )
+    # Send final response (must be done since we deferred earlier)
+    await interaction.followup.send("Game has started! Description phase beginning...")
 
     # Automatically start description phase
     await asyncio.sleep(2)  # Give players time to read their roles
     await start_description_phase(interaction, game)
+
 
 
 async def start_description_phase(interaction: Interaction, game: GameState):
@@ -730,17 +726,15 @@ async def start_description_phase(interaction: Interaction, game: GameState):
 @bot.tree.command(name="vote", description="Start the voting phase")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def vote(interaction: Interaction):
+    await interaction.response.defer()  # Defer response to prevent timeout
+
     game = game_manager.get_game(interaction.channel.id)
     if not game or not game.game_started:
-        await interaction.response.send_message(
-            "No active game found!", ephemeral=True
-        )
+        await interaction.followup.send("No active game found!", ephemeral=True)
         return
 
     if not game.description_phase_started:
-        await interaction.response.send_message(
-            "Complete the description phase first!", ephemeral=True
-        )
+        await interaction.followup.send("Complete the description phase first!", ephemeral=True)
         return
 
     options = []
@@ -755,15 +749,11 @@ async def vote(interaction: Interaction):
             user = await bot.fetch_user(user_id)
             view = discord.ui.View()
             view.add_item(VotingDropdown(game, options))
-            await user.send(
-                "Vote for who you think is the imposter:", view=view
-            )
+            await user.send("Vote for who you think is the imposter:", view=view)
         except discord.DiscordException as e:
             print(f"Failed to send voting message to {user_id}: {e}")
 
-    await interaction.response.send_message(
-        "Voting has started! Results will be shown when everyone has voted."
-    )
+    await interaction.followup.send("Voting has started! Results will be shown when everyone has voted.")
 
 
 @bot.tree.command(
