@@ -84,7 +84,7 @@ class GameState:
         if self.vote_task:
             self.vote_task.cancel()
         self.__init__()
-
+        
 class ErrorHandler:
     @staticmethod
     async def handle_command_error(interaction: Interaction, error: Exception):
@@ -788,6 +788,9 @@ async def start_description_phase(interaction: Interaction, game: GameState):
     settings = server_config.get_settings(str(interaction.guild.id))
 
     game.description_phase_started = True
+    
+    # Print the current word to console
+    print(f"Current word: {game.current_word}")
     
     # Calculate dynamic timeout based on player count
     player_count = len(game.joined_users)
