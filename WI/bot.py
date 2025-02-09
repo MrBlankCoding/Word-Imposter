@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import time
 import re
 import traceback
 from dataclasses import dataclass
@@ -84,7 +85,7 @@ class GameState:
         if self.vote_task:
             self.vote_task.cancel()
         self.__init__()
-        
+
 class ErrorHandler:
     @staticmethod
     async def handle_command_error(interaction: Interaction, error: Exception):
@@ -782,27 +783,36 @@ async def play(interaction: Interaction):
         print(f"Error in play command: {str(e)}")
         await interaction.followup.send("An error occurred while creating the game.", ephemeral=True)
 
-
 async def start_description_phase(interaction: Interaction, game: GameState):
-    # No need to send response here since we're using followup
     settings = server_config.get_settings(str(interaction.guild.id))
-
     game.description_phase_started = True
     
-    # Print the current word to console
     print(f"Current word: {game.current_word}")
     
-    # Calculate dynamic timeout based on player count
+    # Calculate dynamic timeout
     player_count = len(game.joined_users)
     base_timeout = settings.description_timeout
     timeout_adjustment = max(0, (player_count - 5) * 10)
     adjusted_timeout = base_timeout + timeout_adjustment
 
-    await interaction.followup.send("Description phase starting!")
+    # Create a rate limiter for Discord messages
+    last_message_time = 0
+    async def send_message(content: str):
+        nonlocal last_message_time
+        current_time = time.time()
+        
+        # Ensure at least 1 second between messages
+        if current_time - last_message_time < 1:
+            await asyncio.sleep(1 - (current_time - last_message_time))
+        
+        await interaction.followup.send(content)
+        last_message_time = time.time()
+
+    await send_message("Description phase starting!")
 
     for round_num in range(settings.rounds):
         game.round_number = round_num + 1
-        await interaction.followup.send(f"Round {game.round_number}/{settings.rounds}")
+        await send_message(f"Round {game.round_number}/{settings.rounds}")
 
         players = list(game.joined_users)
         random.shuffle(players)
@@ -812,7 +822,7 @@ async def start_description_phase(interaction: Interaction, game: GameState):
                 continue
 
             player = await bot.fetch_user(player_id)
-            await interaction.followup.send(f"{player.mention}'s turn to describe!")
+            await send_message(f"{player.mention}'s turn to describe!")
 
             try:
                 def check(m):
@@ -830,18 +840,18 @@ async def start_description_phase(interaction: Interaction, game: GameState):
                 game.user_descriptions[player_id].append(msg.content)
 
             except asyncio.TimeoutError:
-                await interaction.followup.send(f"{player.mention} took too long!")
+                await send_message(f"{player.mention} took too long!")
                 game.missed_rounds[player_id] = (
                     game.missed_rounds.get(player_id, 0) + 1
                 )
 
                 if game.missed_rounds[player_id] >= settings.max_missed_rounds:
                     game.joined_users.remove(player_id)
-                    await interaction.followup.send(
+                    await send_message(
                         f"{player.mention} has been removed for inactivity!"
                     )
 
-    await interaction.followup.send("Description phase complete! Use /vote to start voting!")
+    await send_message("Description phase complete! Use /vote to start voting!")
 
 @bot.tree.command(name="vote", description="Start the voting phase")
 @commands.cooldown(1, 5, commands.BucketType.channel)
