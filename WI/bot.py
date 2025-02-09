@@ -669,15 +669,17 @@ async def tally_votes(channel, game: GameState):
         embed.add_field(
             name="👻 Imposters Win!", value="They weren't caught!", inline=False
         )
-        imposters = [await bot.fetch_user(imp_id) for imp_id in game.imposters]
-        embed.add_field(
-            name="The Imposters Were",
-            value=", ".join(imp.name for imp in imposters),
-            inline=False,
-        )
-        embed.add_field(
-            name="The Word Was", value=game.current_word, inline=False
-        )
+
+    # Always show imposters and word
+    imposters = [await bot.fetch_user(imp_id) for imp_id in game.imposters]
+    embed.add_field(
+        name="The Imposters Were",
+        value=", ".join(imp.name for imp in imposters),
+        inline=False,
+    )
+    embed.add_field(
+        name="The Word Was", value=game.current_word, inline=False
+    )
 
     # Game statistics
     game_duration = datetime.now() - game.start_time
