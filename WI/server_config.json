@@ -1,0 +1,11 @@
+{
+    "1327136078481850439": {
+        "min_players": 3,
+        "max_players": 10,
+        "rounds": 3,
+        "description_timeout": 60,
+        "vote_timeout": 120,
+        "max_missed_rounds": 2,
+        "num_imposters": 2
+    }
+}

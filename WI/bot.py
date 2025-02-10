@@ -1000,7 +1000,6 @@ async def start_description_phase(interaction: Interaction, game: GameState):
 
     await send_message("Description phase complete! Use /vote to start voting!")
 
-
 @bot.tree.command(name="vote", description="Start the voting phase")
 @commands.cooldown(1, 5, commands.BucketType.channel)
 async def vote(interaction: Interaction):
@@ -1037,17 +1036,16 @@ async def vote(interaction: Interaction):
     for user_id in game.joined_users:
         try:
             user = await bot.fetch_user(user_id)
-            view = discord.ui.View()
-            view.add_item(VotingDropdown(game, options, 1))
+            # Use MultiVoteView instead of a single VotingDropdown
+            view = MultiVoteView(game, options)
             dm_tasks.append(
-                user.send("Vote for who you think is the imposter:", view=view)
+                user.send("Vote for who you think are the imposters:", view=view)
             )
         except discord.DiscordException as e:
             print(f"Failed to send voting message to {user_id}: {e}")
 
     if dm_tasks:
         await asyncio.gather(*dm_tasks, return_exceptions=True)
-
 
 @bot.tree.command(
     name="recall", description="Show all descriptions given during the game"
